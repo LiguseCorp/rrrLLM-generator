@@ -9,19 +9,21 @@ import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
 from transformer_lens import HookedTransformer
-from transformers import AutoTokenizer, AutoModelForCausalLM
-
 from transformer_lens.loading_from_pretrained import OFFICIAL_MODEL_NAMES
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 torch.set_grad_enabled(False)
 
 
 def gpu_usage():
     def inner():
-        r = os.popen("nvidia-smi")
-        text = r.read()
-        r.close()
-        return text
+        if torch.cuda.is_available():
+            r = os.popen("nvidia-smi")
+            text = r.read()
+            r.close()
+            return text
+        else:
+            return "仅支持cuda环境"
 
     return inner
 
@@ -30,6 +32,10 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
     def p(percentage, message):
         print(f"{percentage * 100}%: {message}")
         progress(percentage, message)
+
+    def clear_gpu_cache():
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def get_instructions(file_path, column_name):
         dataset = pd.read_csv(file_path)
@@ -81,13 +87,13 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         harmful_logits, harmful_cache = model.run_with_cache(harmful_tokens,
                                                              names_filter=lambda hook_name: 'resid' in hook_name)
         harmful_logits.cpu()
-        torch.cuda.empty_cache()
+        clear_gpu_cache()
 
         p(0.5, "正在获取无害数据库中间过程参数...")
         harmless_logits, harmless_cache = model.run_with_cache(harmless_tokens,
                                                                names_filter=lambda hook_name: 'resid' in hook_name)
         harmless_logits.cpu()
-        torch.cuda.empty_cache()
+        clear_gpu_cache()
 
         p(0.7, "正在计算有害与无害激活平均差异...")
         pos = -1
@@ -133,7 +139,7 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         p(0.73, "正在清理内存与显存...")
         model.cpu()
         gc.collect()
-        torch.cuda.empty_cache()
+        clear_gpu_cache()
 
         p(0.75, "正在创建原模型副本...")
         save_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, device_map=device)
@@ -151,7 +157,7 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         p(1, "完成")
         save_model = save_model.cpu()
         gc.collect()
-        torch.cuda.empty_cache()
+        clear_gpu_cache()
 
         if 'save_model' in locals():
             del save_model
@@ -166,7 +172,7 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
                 del locals()[var_name]
 
         # 清理显存
-        torch.cuda.empty_cache()
+        clear_gpu_cache()
 
         return ["🤯 发生错误\n\n" + str(e), "已清理显卡显存占用"]
 
@@ -189,7 +195,7 @@ app = gr.Interface(fn=process, inputs=[
 ], outputs=[gr.Text(label="状态", value="就绪"),
             gr.Textbox(label="显卡实时状态",
                        value=gpu_usage(),
-                       every=3)], title="去除安全审查大模型生成器",
-                   description="通过对检测到的拒绝方向进行正交移除，实现生成去除安全审查后的大模型。")
+                       every=3)], title="rrrLLM Generator",
+                   description="通过对层中检测到的拒绝方向进行消除，实现生成更低拒绝回答率的大模型。")
 
-app.launch(share=False, server_port=6001, server_name="0.0.0.0")
+app.launch(share=False, server_port=8080, server_name="0.0.0.0")
