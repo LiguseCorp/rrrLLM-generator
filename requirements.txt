@@ -1,0 +1,8 @@
+einops~=0.8.0
+gradio~=4.41.0
+pandas~=2.2.2
+torch~=2.4.0
+datasets~=2.21.0
+jaxtyping~=0.2.33
+scikit-learn~=1.5.1
+transformers~=4.44.0
