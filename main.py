@@ -16,8 +16,14 @@ import argparse
 parser = argparse.ArgumentParser(description="rrrLLM")
 parser.add_argument('--ip', type=str, default="0.0.0.0", help='IP the web interface running on')
 parser.add_argument('--port', type=int, default=8080, help='Port the web interface running on')
+parser.add_argument('--cli', action="store_true", default=8080, help='Use CLI instead of web interface')
+parser.add_argument('--model-name', type=str, default="Qwen/Qwen2-1.5B-Instruct", help='The model to be processed. Default is Qwen/Qwen2-1.5B-Instruct')
+parser.add_argument('--n-inst-train', type=int, default=32, help='The number of training instances for refusal direction. Default is 32')
+parser.add_argument('--refusal-dir-coefficient', type=float, default=1, help='The coefficient for refusal direction. Default is 1')
+parser.add_argument('--layer', type=str, default="-1", help='The layer to be processed. Default is -1')
+parser.add_argument('--device', type=str, default="cuda", help='The device to run on. Default is cuda')
 
-args = parser.parse_args()
+args, unknown = parser.parse_known_args()
 
 torch.set_grad_enabled(False)
 
@@ -169,6 +175,7 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         if 'save_model' in locals():
             del save_model
 
+        print("🤗 创建成功\n\n已保存模型到" + os.getcwd() + f"/{model_name}-Without-Refusal")
         return ["🤗 创建成功\n\n已保存模型到" + os.getcwd() + f"/{model_name}-Without-Refusal", "已清理显卡显存占用"]
     except Exception as e:
         print(e)
@@ -184,25 +191,38 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         return ["🤯 发生错误\n\n" + str(e), "已清理显卡显存占用"]
 
 
-# 无界面运行
-# process("Qwen/Qwen2-7B-Instruct", 19, 1, "12", "cuda")
+if args.cli:
+    print("\n\n\n----------CLI Mode----------\n")
+    print(f"""Arguments:
+    - Model Name: {args.model_name}
+    - Number of Training Instances: {args.n_inst_train}
+    - Refusal Direction Coefficient: {args.refusal_dir_coefficient}
+    - Layer: {args.layer if args.layer != "-1" else "Middle(-1)"}
+    - Device: {args.device}
+    """)
+    print("Continue? (y/n)")
+    if input() == "y":
+        process(args.model_name, args.n_inst_train, args.refusal_dir_coefficient, args.layer, args.device)
+    else:
+        print("Use --help for help")
+        exit()
+else:
+    app = gr.Interface(fn=process, inputs=[
+        gr.Dropdown(
+            OFFICIAL_MODEL_NAMES,
+            label="model_name", info="需处理模型（目前仅支持列表中的模型）", value="Qwen/Qwen2-1.5B-Instruct"
+        ),
+        gr.Slider(1, 500, value=32, label="n_inst_train",
+                  info="拒绝方向钓鱼例句数量\n更加精准的判别拒绝方向（越大越准确）（高显存需求）"),
+        gr.Slider(0.5, 2, value=1, label="refusal_dir_coefficient",
+                  info="去除拒绝方向系数（增强去除效果。会显著影响大模型自身能力。）（默认为1）"),
+        gr.Text(label="layer", value="-1", info="提取特征层（-1为取模型中间层，-2为对每一层独立进行处理（高显存需求））"),
+        gr.Text(label="device", value="cuda", info="运行设备")
 
-app = gr.Interface(fn=process, inputs=[
-    gr.Dropdown(
-        OFFICIAL_MODEL_NAMES,
-        label="model_name", info="需处理模型（目前仅支持列表中的模型）", value="Qwen/Qwen2-1.5B-Instruct"
-    ),
-    gr.Slider(1, 500, value=32, label="n_inst_train",
-              info="拒绝方向钓鱼例句数量\n更加精准的判别拒绝方向（越大越准确）（高显存需求）"),
-    gr.Slider(0.5, 2, value=1, label="refusal_dir_coefficient",
-              info="去除拒绝方向系数（增强去除效果。会显著影响大模型自身能力。）（默认为1）"),
-    gr.Text(label="layer", value="-1", info="提取特征层（-1为取模型中间层，-2为对每一层独立进行处理（高显存需求））"),
-    gr.Text(label="device", value="cuda", info="运行设备")
+    ], outputs=[gr.Text(label="状态", value="就绪"),
+                gr.Textbox(label="显卡实时状态",
+                           value=gpu_usage(),
+                           every=3)], title="rrrLLM Generator",
+                       description="通过对层中检测到的拒绝方向进行消除，实现生成更低拒绝回答率的大模型。")
 
-], outputs=[gr.Text(label="状态", value="就绪"),
-            gr.Textbox(label="显卡实时状态",
-                       value=gpu_usage(),
-                       every=3)], title="rrrLLM Generator",
-                   description="通过对层中检测到的拒绝方向进行消除，实现生成更低拒绝回答率的大模型。")
-
-app.launch(share=False, server_port=args.port, server_name=args.host)
+    app.launch(share=False, server_port=args.port, server_name=args.host)
