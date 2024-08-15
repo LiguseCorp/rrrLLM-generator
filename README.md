@@ -6,6 +6,7 @@ Rare Refusal-Reply LLM generator. Aimed at generating a new model based on an ex
 
 ## Web screenshots
 
+![image.png](assets/image.png)
 
 # Installation
 
