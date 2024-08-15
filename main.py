@@ -11,6 +11,13 @@ from sklearn.model_selection import train_test_split
 from transformer_lens import HookedTransformer
 from transformer_lens.loading_from_pretrained import OFFICIAL_MODEL_NAMES
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import argparse
+
+parser = argparse.ArgumentParser(description="rrrLLM")
+parser.add_argument('--ip', type=str, default="0.0.0.0", help='IP the web interface running on')
+parser.add_argument('--port', type=int, default=8080, help='Port the web interface running on')
+
+args = parser.parse_args()
 
 torch.set_grad_enabled(False)
 
@@ -198,4 +205,4 @@ app = gr.Interface(fn=process, inputs=[
                        every=3)], title="rrrLLM Generator",
                    description="通过对层中检测到的拒绝方向进行消除，实现生成更低拒绝回答率的大模型。")
 
-app.launch(share=False, server_port=8080, server_name="0.0.0.0")
+app.launch(share=False, server_port=args.port, server_name=args.host)
