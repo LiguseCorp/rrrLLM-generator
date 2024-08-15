@@ -1,0 +1,160 @@
+import functools
+import gc
+import os
+from typing import List, Optional
+
+import einops
+import gradio as gr
+import pandas as pd
+import torch
+from transformer_lens import HookedTransformer
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+
+def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, progress=gr.Progress()):
+    def p(percentage, message):
+        print(f"{percentage * 100}%: {message}")
+        progress(percentage, message)
+
+    def clear_gpu_cache():
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def get_instructions(file_path, column_name):
+        dataset = pd.read_csv(file_path)
+        instructions = dataset[column_name].tolist()
+        return instructions
+
+    def tokenize_instructions(tokenizer, instructions):
+        prompts = [tokenizer.apply_chat_template(
+            [{"role": "user", "content": instruction}],
+            tokenize=False,
+            add_generation_prompt=True
+        ) for instruction in instructions]
+        return tokenizer(prompts, padding=True, truncation=False, return_tensors="pt").input_ids
+
+    def get_orthogonalized_matrix(matrix, vec):
+        proj = einops.einsum(matrix, vec.view(-1, 1), '... d_model, d_model single -> ... single') * vec
+        return matrix - proj
+
+    try:
+        p(0, "正在加载模型...")
+
+        model = HookedTransformer.from_pretrained(
+            model_name,
+            device=device,
+            n_devices=1,
+            dtype=torch.bfloat16,
+            default_padding_side='left'
+        )
+        model.tokenizer.padding_side = 'left'
+        model.tokenizer.pad_token = '<|extra_0|>'
+
+        tokenize_instructions_fn = functools.partial(tokenize_instructions, tokenizer=model.tokenizer)
+        model.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        p(0.1, "正在加载有害数据库...")
+        harmful_inst_train = get_instructions("harmful_behaviors.csv", 'goal')
+
+        p(0.15, "正在加载无害数据库...")
+        harmless_inst_train = get_instructions("harmless_behaviors.csv", 'goal')
+
+        p(0.2, "正在分词有害数据库...")
+        harmful_tokens = tokenize_instructions_fn(instructions=harmful_inst_train[:n_inst_train])
+
+        p(0.25, "正在分词无害数据库...")
+        harmless_tokens = tokenize_instructions_fn(instructions=harmless_inst_train[:n_inst_train])
+
+        p(0.3, "正在获取有害数据库中间过程参数...")
+        harmful_logits, harmful_cache = model.run_with_cache(harmful_tokens,
+                                                             names_filter=lambda hook_name: 'resid' in hook_name)
+        harmful_logits.cpu()
+        clear_gpu_cache()
+
+        p(0.5, "正在获取无害数据库中间过程参数...")
+        harmless_logits, harmless_cache = model.run_with_cache(harmless_tokens,
+                                                               names_filter=lambda hook_name: 'resid' in hook_name)
+        harmless_logits.cpu()
+        clear_gpu_cache()
+
+        p(0.7, "正在计算有害与无害激活平均差异...")
+        pos = -1
+
+        refusal_dir: List[Optional[torch.Tensor]] = [None for _ in range(len(model.blocks))]
+
+        if layer == "-2":
+            layer = [i for i in range(len(model.blocks))]
+        elif layer == "-1":
+            layer = [int(len(model.blocks) / 2)]
+        elif len(layer.split(",")) != 1:
+            layer = [int(i) for i in layer.split(",")]
+        else:
+            layer = [int(layer)]
+
+        if int(len(model.blocks) / 2) not in layer:
+            layer.append(int(len(model.blocks) / 2))
+
+        for i in layer:
+            harmful_mean_act = harmful_cache['resid_pre', i][:, pos, :].mean(dim=0)
+            harmless_mean_act = harmless_cache['resid_pre', i][:, pos, :].mean(dim=0)
+            refusal_dir[i] = harmful_mean_act - harmless_mean_act
+            refusal_dir[i] = refusal_dir[i] / refusal_dir[i].norm()
+            refusal_dir[i] = refusal_dir[i] * refusal_dir_coefficient
+
+        filtered_tensors = [t for t in refusal_dir if t is not None]
+        weights = torch.randn(len(filtered_tensors))
+        weights = torch.softmax(weights, dim=0)
+        combined_tensor = torch.sum(torch.stack([w * t for w, t in zip(weights, filtered_tensors)]), dim=0)
+
+        p(0.72, "正在移除原模型安全方向向量...")
+
+        print(f"模型总层数：{len(model.blocks)} 当前提取用层数：{layer}")
+
+        blocks: List[List[Optional[torch.Tensor]]] = [[None, None] for _ in range(len(model.blocks))]
+
+        for i in range(len(model.blocks)):
+            blocks[i][0] = get_orthogonalized_matrix(model.blocks[i].attn.W_O, combined_tensor)
+            blocks[i][1] = get_orthogonalized_matrix(model.blocks[i].mlp.W_out, combined_tensor)
+
+        model_W_E_data = get_orthogonalized_matrix(model.W_E, combined_tensor)
+
+        p(0.73, "正在清理内存与显存...")
+        model.cpu()
+        gc.collect()
+        clear_gpu_cache()
+
+        p(0.75, "正在创建原模型副本...")
+        save_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, device_map=device)
+
+        p(0.95, "正在写入新向量到新模型...")
+        with torch.no_grad():
+            save_model.model.embed_tokens.weight.data = model_W_E_data.contiguous()
+            size = blocks[layer[0]][0].shape[-1]
+            for i in range(len(blocks)):
+                save_model.model.layers[i].self_attn.o_proj.weight.data = blocks[i][0].view(-1, size).T.contiguous()
+                save_model.model.layers[i].mlp.down_proj.weight.data = blocks[i][1].T.contiguous()
+        save_model.save_pretrained(f"{model_name}-Without-Refusal")
+        AutoTokenizer.from_pretrained(model_name).save_pretrained(f"{model_name}-Without-Refusal")
+
+        p(1, "完成")
+        save_model = save_model.cpu()
+        gc.collect()
+        clear_gpu_cache()
+
+        if 'save_model' in locals():
+            del save_model
+
+        print("🤗 创建成功\n\n已保存模型到" + os.getcwd() + f"/{model_name}-Without-Refusal")
+        return ["🤗 创建成功\n\n已保存模型到" + os.getcwd() + f"/{model_name}-Without-Refusal", "已清理显卡显存占用"]
+    except Exception as e:
+        print(e)
+
+        # 检查并删除变量
+        for var_name in ['model', 'save_model']:
+            if var_name in locals():
+                del locals()[var_name]
+
+        # 清理显存
+        clear_gpu_cache()
+
+        return ["🤯 发生错误\n\n" + str(e), "已清理显卡显存占用"]
