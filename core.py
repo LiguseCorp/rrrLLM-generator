@@ -5,13 +5,13 @@ from typing import List, Optional
 
 import einops
 import gradio as gr
-import pandas as pd
 import torch
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, progress=gr.Progress()):
+def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, harmful_behaviors_file_path,
+            harmless_behaviors_file_path, progress=gr.Progress()):
     def p(percentage, message):
         print(f"{percentage * 100}%: {message}")
         progress(percentage, message)
@@ -21,9 +21,11 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def get_instructions(file_path, column_name):
-        dataset = pd.read_csv(file_path)
-        instructions = dataset[column_name].tolist()
+    def get_instructions(file_path):
+        with open(file_path, 'r', encoding='utf-8') as file:
+            instructions = file.readlines()
+
+        instructions = [line.strip() for line in instructions]
         return instructions
 
     def tokenize_instructions(tokenizer, instructions):
@@ -55,10 +57,10 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         model.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 
         p(0.1, "正在加载有害数据库...")
-        harmful_inst_train = get_instructions("harmful_behaviors.csv", 'goal')
+        harmful_inst_train = get_instructions(harmful_behaviors_file_path)
 
         p(0.15, "正在加载无害数据库...")
-        harmless_inst_train = get_instructions("harmless_behaviors.csv", 'goal')
+        harmless_inst_train = get_instructions(harmless_behaviors_file_path)
 
         p(0.2, "正在分词有害数据库...")
         harmful_tokens = tokenize_instructions_fn(instructions=harmful_inst_train[:n_inst_train])

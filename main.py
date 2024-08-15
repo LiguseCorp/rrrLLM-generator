@@ -37,6 +37,8 @@ parser.add_argument('--refusal-dir-coefficient', type=float, default=1,
 parser.add_argument('--layer', type=str, default="-1", help='The layer to be processed. Default is -1')
 parser.add_argument('--device', type=str, default=default_device,
                     help=f'The device to run on. Default is {default_device}')
+parser.add_argument('--harmful-behaviors-txt', type=str, default="data/harmful_behaviors.txt", )
+parser.add_argument('--harmless-behaviors-txt', type=str, default="data/harmless_behaviors.txt", )
 
 args, unknown = parser.parse_known_args()
 
@@ -64,10 +66,13 @@ if args.cli:
     - Refusal Direction Coefficient: {args.refusal_dir_coefficient}
     - Layer: {args.layer if args.layer != "-1" else "Middle(-1)"}
     - Device: {args.device}
+    - Harmful Behaviors TXT: {args.harmful_behaviors_txt}
+    - Harmless Behaviors TXT: {args.harmless_behaviors_txt}
     """)
     print("Continue? (y/n)")
     if input() == "y":
-        core.process(args.model_name, args.n_inst_train, args.refusal_dir_coefficient, args.layer, args.device)
+        core.process(args.model_name, args.n_inst_train, args.refusal_dir_coefficient, args.layer, args.device,
+                     args.harmful_behaviors_txt, args.harmless_behaviors_txt)
         exit()
     else:
         print("Use --help for help")
@@ -83,7 +88,10 @@ else:
         gr.Slider(0.5, 2, value=1, label="refusal_dir_coefficient",
                   info="去除拒绝方向系数（增强去除效果。会显著影响大模型自身能力。）（默认为1）"),
         gr.Text(label="layer", value="-1", info="提取特征层（-1为取模型中间层，-2为对每一层独立进行处理（高显存需求））"),
-        gr.Text(label="device", value=default_device, info="运行设备")
+        gr.Text(label="device", value=default_device, info="运行设备"),
+        gr.File(label="harmful_behaviors.txt", value="data/harmful_behaviors.txt", type="filepath", file_types=["txt"]),
+        gr.File(label="harmless_behaviors.txt", value="data/harmless_behaviors.txt", type="filepath",
+                file_types=["txt"]),
 
     ], outputs=[gr.Text(label="状态", value="就绪"),
                 gr.Textbox(label="显卡实时状态",
