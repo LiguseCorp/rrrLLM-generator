@@ -68,6 +68,7 @@ if args.cli:
     print("Continue? (y/n)")
     if input() == "y":
         core.process(args.model_name, args.n_inst_train, args.refusal_dir_coefficient, args.layer, args.device)
+        exit()
     else:
         print("Use --help for help")
         exit()

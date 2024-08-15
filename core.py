@@ -17,6 +17,7 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         progress(percentage, message)
 
     def clear_gpu_cache():
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -68,13 +69,15 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         p(0.3, "正在获取有害数据库中间过程参数...")
         harmful_logits, harmful_cache = model.run_with_cache(harmful_tokens,
                                                              names_filter=lambda hook_name: 'resid' in hook_name)
-        harmful_logits.cpu()
+        harmful_logits = harmful_logits.cpu()
+        del harmful_logits
         clear_gpu_cache()
 
         p(0.5, "正在获取无害数据库中间过程参数...")
         harmless_logits, harmless_cache = model.run_with_cache(harmless_tokens,
                                                                names_filter=lambda hook_name: 'resid' in hook_name)
-        harmless_logits.cpu()
+        harmless_logits = harmless_logits.cpu()
+        del harmless_logits
         clear_gpu_cache()
 
         p(0.7, "正在计算有害与无害激活平均差异...")
@@ -101,6 +104,9 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
             refusal_dir[i] = refusal_dir[i] / refusal_dir[i].norm()
             refusal_dir[i] = refusal_dir[i] * refusal_dir_coefficient
 
+        del harmful_cache, harmless_cache
+        torch.cuda.empty_cache()
+
         filtered_tensors = [t for t in refusal_dir if t is not None]
         weights = torch.randn(len(filtered_tensors))
         weights = torch.softmax(weights, dim=0)
@@ -119,8 +125,8 @@ def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, pr
         model_W_E_data = get_orthogonalized_matrix(model.W_E, combined_tensor)
 
         p(0.73, "正在清理内存与显存...")
-        model.cpu()
-        gc.collect()
+        model = model.cpu()
+        del model
         clear_gpu_cache()
 
         p(0.75, "正在创建原模型副本...")
