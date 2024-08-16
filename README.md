@@ -2,7 +2,7 @@
 
 Rare Refusal-Reply LLM generator. Aimed at generating a new model based on an existing one, with almost the same performance but a lower rate of refusal replies.
 
-
+[![Generic badge](https://img.shields.io/badge/python-3.9%7C3.10%7C3.11-blue.svg)](https://pypi.org/project/pypiserver/)
 **Low VRAM Needed**
 
 # Preview
