@@ -10,16 +10,17 @@ from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
+def clear_gpu_cache():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def process(model_name, n_inst_train, refusal_dir_coefficient, layer, device, harmful_behaviors_file_path,
             harmless_behaviors_file_path, progress=gr.Progress()):
     def p(percentage, message):
         print(f"{percentage * 100}%: {message}")
         progress(percentage, message)
-
-    def clear_gpu_cache():
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     def get_instructions(file_path):
         with open(file_path, 'r', encoding='utf-8') as file:
