@@ -4,11 +4,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 model_name = "Qwen/Qwen2-7B-Instruct-Without-Refusal"
 # model_name = "01-ai/Yi-6B-Chat-Without-Refusal"
 
+DEVICE = 'cuda'
+
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.bfloat16,
-    device_map="cuda"
-).to("cuda")
+    device_map=DEVICE
+).to(DEVICE)
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -25,7 +27,7 @@ while True:
         tokenize=False,
         add_generation_prompt=True
     )
-    model_inputs = tokenizer([text], return_tensors="pt").to("cuda")
+    model_inputs = tokenizer([text], return_tensors="pt").to(DEVICE)
 
     generated_ids = model.generate(
         model_inputs.input_ids,

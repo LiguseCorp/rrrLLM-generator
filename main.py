@@ -71,8 +71,8 @@ if args.cli:
     """)
     print("Continue? (y/n)")
     if input() == "y":
-        core.process(args.model_name, args.n_inst_train, args.refusal_dir_coefficient, args.layer, args.device,
-                     args.harmful_behaviors_txt, args.harmless_behaviors_txt)
+        core.remove_mode(args.model_name, args.n_inst_train, args.refusal_dir_coefficient, args.layer, args.device,
+                         args.harmful_behaviors_txt, args.harmless_behaviors_txt)
         exit()
     else:
         print("Use --help for help")
@@ -93,12 +93,24 @@ else:
                 layer = gr.Text(label="layer", value="-1",
                                 info="提取特征层（-1为取模型中间层，-2为对每一层独立进行处理（高显存需求））")
                 device = gr.Text(label="device", value=default_device, info="运行设备")
-                harmful_behaviors = gr.File(label="harmful_behaviors.txt", value="data/harmful_behaviors.txt",
-                                            type="filepath",
-                                            file_types=["txt"])
-                harmless_behaviors = gr.File(label="harmless_behaviors.txt", value="data/harmless_behaviors.txt",
-                                             type="filepath",
-                                             file_types=["txt"])
+
+                with gr.Tab("去除方向"):
+                    harmful_behaviors = gr.File(label="harmful_behaviors.txt", value="data/harmful_behaviors.txt",
+                                                type="filepath",
+                                                file_types=["txt"])
+                    harmless_behaviors = gr.File(label="harmless_behaviors.txt", value="data/harmless_behaviors.txt",
+                                                 type="filepath",
+                                                 file_types=["txt"])
+                    remove_mode = gr.Button(value="Run", variant="primary")
+                with gr.Tab("转向方向"):
+                    target_prompt = gr.Text(label="target_prompt",
+                                            value=". Your response must be in JSON format without any extra content.",
+                                            info="希望模型转向的提示")
+                    basic_behaviors = gr.File(label="harmless_behaviors.txt", value="data/harmless_behaviors.txt",
+                                              type="filepath",
+                                              file_types=["txt"])
+                    divert_mode = gr.Button(value="Run", variant="primary")
+
             with gr.Column():
                 status = gr.Text(label="状态", value="就绪")
                 with gr.Column():
@@ -107,28 +119,12 @@ else:
                                             every=3)
                     clear_vram = gr.Button(value="清理显存")
                     clear_vram.click(core.clear_gpu_cache, [], [])
-        btn = gr.Button(value="运行", variant="primary")
-        btn.click(core.process, [model_name, n_inst_train, refusal_dir_coefficient, layer, device, harmful_behaviors,
-                                 harmless_behaviors], [status])
-# app = gr.Interface(fn=core.process, inputs=[
-#     gr.Dropdown(
-#         OFFICIAL_MODEL_NAMES,
-#         label="model_name", info="需处理模型（目前仅支持列表中的模型）", value="Qwen/Qwen2-1.5B-Instruct"
-#     ),
-#     gr.Slider(1, 500, value=32, label="n_inst_train",
-#               info="拒绝方向钓鱼例句数量\n更加精准的判别拒绝方向（越大越准确）（高显存需求）"),
-#     gr.Slider(0.5, 2, value=1, label="refusal_dir_coefficient",
-#               info="去除拒绝方向系数（增强去除效果。会显著影响大模型自身能力。）（默认为1）"),
-#     gr.Text(label="layer", value="-1", info="提取特征层（-1为取模型中间层，-2为对每一层独立进行处理（高显存需求））"),
-#     gr.Text(label="device", value=default_device, info="运行设备"),
-#     gr.File(label="harmful_behaviors.txt", value="data/harmful_behaviors.txt", type="filepath", file_types=["txt"]),
-#     gr.File(label="harmless_behaviors.txt", value="data/harmless_behaviors.txt", type="filepath",
-#             file_types=["txt"]),
-#
-# ], outputs=[gr.Text(label="状态", value="就绪"),
-#             gr.Textbox(label="显卡实时状态",
-#                        value=gpu_usage(),
-#                        every=3)], title="rrrLLM Generator",
-#                    description="通过对层中检测到的拒绝方向进行消除，实现生成更低拒绝回答率的大模型。")
-#
+
+            remove_mode.click(core.remove_mode,
+                              [model_name, n_inst_train, refusal_dir_coefficient, layer, device, harmful_behaviors,
+                               harmless_behaviors], [status])
+            divert_mode.click(core.divert_mode,
+                              [model_name, n_inst_train, refusal_dir_coefficient, layer, device, target_prompt,
+                               basic_behaviors], [status])
+
 app.launch(share=False, server_port=args.port, server_name=args.host)

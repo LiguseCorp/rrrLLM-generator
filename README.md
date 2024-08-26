@@ -78,7 +78,12 @@ This will print out the response "Paris" from the GPT-3 model. You can replace `
 
 # Requirements
 
-Qwen2-1.5B-Instruct: 14G VRAM
+Qwen2-1.5B-Instruct:
+
+At least: 14G VRAM
+
+RTX 4090: 23.2s complete.
+
 
 Qwen2-7B-Instruct: 20G VRAM (RTX 4090 24G Tested)
 
